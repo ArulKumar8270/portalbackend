@@ -1,0 +1,26 @@
+{
+  "development": {
+    "username": "u490757224_nicknameportal",
+    "password": "Nicknameportal@2024",
+    "database": "u490757224_nicknameportal",
+    "host": "nicknameinfotech.com",
+    "dialect": "mysql",
+    "operatorsAliases": false
+  },
+  "test": {
+    "username": "u490757224_nicknameportal",
+    "password": "Nicknameportal@2024",
+    "database": "u490757224_nicknameportal",
+    "host": "nicknameinfotech.com",
+    "dialect": "mysql",
+    "operatorsAliases": false
+  },
+  "production": {
+    "username": "u490757224_nicknameportal",
+    "password": "Nicknameportal@2024",
+    "database": "u490757224_nicknameportal",
+    "host": "nicknameinfotech.com",
+    "dialect": "mysql",
+    "operatorsAliases": false
+  }
+}

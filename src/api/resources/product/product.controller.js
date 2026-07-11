@@ -23,6 +23,35 @@ const getVendorStoreId = (user) => {
   return vendorId || storeId || null;
 };
 
+function parseOneDayTruthy(value) {
+  return value === true || value === "1" || value === 1 || value === "true";
+}
+
+function parseOptionalNumber(value) {
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function normalizeProductSku(value) {
+  const sku = String(value ?? "").trim();
+  return sku || null;
+}
+
+async function assertUniqueProductSku(sku, excludeId = null) {
+  const normalized = normalizeProductSku(sku);
+  if (!normalized) return null;
+  const where = { productSku: normalized };
+  if (excludeId != null) {
+    where.id = { [Op.ne]: Number(excludeId) };
+  }
+  const existing = await db.product.findOne({ where, attributes: ["id"] });
+  if (existing) {
+    throw new RequestError("Product ID already in use", 409);
+  }
+  return normalized;
+}
+
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 
 
@@ -68,6 +97,7 @@ module.exports = {
         name,
         slug,
         brand,
+        productSku,
         status,
         unitSize,
         sortDesc,
@@ -91,8 +121,14 @@ module.exports = {
         serviceType,
         size,
         weight,
+        height,
         sizeUnitSizeMap,
-        clientId
+        clientId,
+        isOneDayEnabled,
+        oneDayPrice,
+        oneDayMaxQty,
+        oneDayTrialOnly,
+        oneDayTrialPrice,
       } = req.body;
       // Handle description field (map to desc if description is provided)
       const productDesc = desc || description || "";
@@ -122,6 +158,13 @@ module.exports = {
         productPhoto = photo;
       }
 
+      let resolvedProductSku = null;
+      try {
+        resolvedProductSku = await assertUniqueProductSku(productSku);
+      } catch (skuErr) {
+        return next(skuErr);
+      }
+
       return db.product
         .create({
           categoryId: Number(categoryId),
@@ -131,6 +174,7 @@ module.exports = {
           slug: slug,
           status: status,
           brand: brand,
+          productSku: resolvedProductSku,
           unitSize: unitSize,
           sortDesc: sortDesc,
           desc: productDesc,
@@ -152,11 +196,23 @@ module.exports = {
           serviceType: serviceType,
           size: size || null,
           weight: weight || null,
+          height: height || null,
           sizeUnitSizeMap: parsedSizeUnitSizeMap,
           // Note: products table doesn't have vendorId column, using createdId instead
-          clientId: clientId || null
+          clientId: clientId || null,
+          isOneDayEnabled: parseOneDayTruthy(isOneDayEnabled),
+          oneDayPrice: oneDayPrice != null && oneDayPrice !== "" ? Number(oneDayPrice) : null,
+          oneDayMaxQty: oneDayMaxQty != null && oneDayMaxQty !== "" ? Number(oneDayMaxQty) : null,
+          oneDayTrialOnly:
+            parseOneDayTruthy(isOneDayEnabled) && parseOneDayTruthy(oneDayTrialOnly),
+          oneDayTrialPrice: parseOptionalNumber(oneDayTrialPrice),
         })
-        .then((product) => {
+        .then(async (product) => {
+          if (!product.productSku) {
+            const autoSku = `SKU-${product.id}`;
+            await product.update({ productSku: autoSku });
+            product.productSku = autoSku;
+          }
           res.status(200).json({
             success: true,
             msg: "Successfully inserted product",
@@ -306,6 +362,7 @@ module.exports = {
         name,
         slug,
         brand,
+        productSku,
         status,
         unitSize,
         desc,
@@ -329,11 +386,17 @@ module.exports = {
         serviceType,
         size,
         weight,
-        sizeUnitSizeMap
+        height,
+        sizeUnitSizeMap,
+        isOneDayEnabled,
+        oneDayPrice,
+        oneDayMaxQty,
+        oneDayTrialOnly,
+        oneDayTrialPrice,
       } = req.body;
 
       // Build where clause for finding product
-      const whereClause = { id };
+      const whereClause = { id: id || productId };
       
       // If user is authenticated, verify ownership
       if (vendorStoreId) {
@@ -342,7 +405,7 @@ module.exports = {
 
       db.product
         .findOne({ where: whereClause })
-        .then((product) => {
+        .then(async (product) => {
           if (product) {
             // Verify ownership if user is authenticated
             if (vendorStoreId) {
@@ -376,6 +439,11 @@ module.exports = {
               }
             }
 
+            let nextProductSku = product.productSku;
+            if (productSku !== undefined) {
+              nextProductSku = await assertUniqueProductSku(productSku, product.id);
+            }
+
             return db.product.update(
               {
                 categoryId: categoryId !== undefined ? categoryId : product.categoryId,
@@ -389,6 +457,7 @@ module.exports = {
                 slug: slug !== undefined ? slug : product.slug,
                 status: status !== undefined ? status : product.status,
                 brand: brand !== undefined ? brand : product?.brand,
+                productSku: nextProductSku,
                 unitSize: unitSize !== undefined ? unitSize : product.unitSize,
                 desc: productDesc,
                 photo: photo !== undefined && photo !== null ? photo : product.photo,
@@ -410,7 +479,43 @@ module.exports = {
                 serviceType: serviceType !== undefined ? serviceType : product.serviceType,
                 size: size !== undefined ? size : product.size,
                 weight: weight !== undefined ? weight : product.weight,
-                sizeUnitSizeMap: parsedSizeUnitSizeMap
+                height: height !== undefined ? height : product.height,
+                sizeUnitSizeMap: parsedSizeUnitSizeMap,
+                isOneDayEnabled: isOneDayEnabled !== undefined
+                  ? parseOneDayTruthy(isOneDayEnabled)
+                  : product.isOneDayEnabled,
+                oneDayPrice: oneDayPrice !== undefined
+                  ? (oneDayPrice != null && oneDayPrice !== "" ? Number(oneDayPrice) : null)
+                  : product.oneDayPrice,
+                oneDayMaxQty: oneDayMaxQty !== undefined
+                  ? (oneDayMaxQty != null && oneDayMaxQty !== "" ? Number(oneDayMaxQty) : null)
+                  : product.oneDayMaxQty,
+                oneDayTrialOnly: (() => {
+                  const nextOneDayEnabled =
+                    isOneDayEnabled !== undefined
+                      ? parseOneDayTruthy(isOneDayEnabled)
+                      : product.isOneDayEnabled;
+                  if (!nextOneDayEnabled) return false;
+                  if (oneDayTrialOnly !== undefined) {
+                    return parseOneDayTruthy(oneDayTrialOnly);
+                  }
+                  return Boolean(product.oneDayTrialOnly);
+                })(),
+                oneDayTrialPrice: (() => {
+                  const nextOneDayEnabled =
+                    isOneDayEnabled !== undefined
+                      ? parseOneDayTruthy(isOneDayEnabled)
+                      : product.isOneDayEnabled;
+                  const nextTrialOnly =
+                    oneDayTrialOnly !== undefined
+                      ? parseOneDayTruthy(oneDayTrialOnly)
+                      : Boolean(product.oneDayTrialOnly);
+                  if (!nextOneDayEnabled || !nextTrialOnly) return null;
+                  if (oneDayTrialPrice !== undefined) {
+                    return parseOptionalNumber(oneDayTrialPrice);
+                  }
+                  return product.oneDayTrialPrice;
+                })(),
               },
               { where: { id: product.id } }
             );

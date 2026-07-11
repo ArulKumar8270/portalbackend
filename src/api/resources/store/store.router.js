@@ -56,7 +56,7 @@ storeRouter.route('/public/by-ids').post(sanitize(), storePublicController.getSt
 
 // Store visit tracking (POST public for Frontend; GET reports requires auth)
 storeRouter.route('/visit').post(storeVisitController.recordVisit); 
-storeRouter.route('/visit/reports').get(sanitize(), jwtStrategy, storeVisitController.getVisitReports);
+storeRouter.route('/visit/reports').get(sanitize(), storeVisitController.getVisitReports);
 
 // ============================================
 // Store Menu Permissions Routes (Admin Only)

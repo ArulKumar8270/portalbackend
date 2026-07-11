@@ -48,6 +48,7 @@ const PUBLIC_ROUTES = [
   '/store/service/getAllStoresByFilters',
   '/store/getOpenStores',
   '/store/visit',
+  '/store/visit/reports',
 
   // Product routes
   '/product/add',
@@ -109,14 +110,43 @@ const PUBLIC_ROUTES = [
 
   // App version (update check)
   '/app/version',
+
+  // One-day delivery (public)
+  '/one-day/settings/:storeId',
+  '/one-day/products/public/:storeId',
+  '/one-day/orders/quote',
+  '/one-day/employee/login',
+  '/one-day/orders/:id/track',
+  '/one-day/orders/:id/cancel',
+  '/one-day/orders/:id/request-refund',
+  '/order/:id/cancel',
+  '/order/:id/request-refund',
+
+  // Rental store (public)
+  '/rental/settings/:storeId',
+  '/rental/catalog/public/:storeId',
+  '/rental/bookings/quote',
+  '/rental/bookings',
+  '/rental/bookings/customer',
+  '/rental/booking/:id',
+  '/rental/bookings/:id/cancel',
+  '/rental/bookings/:id/confirm-handover',
+  '/rental/bookings/:id/return-request',
+  '/rental/bookings/:id/extend/quote',
+  '/rental/bookings/:id/extend',
 ];
 
 /**
  * Check if a route is public (doesn't require authentication)
  */
 const isPublicRoute = (path, method) => {
-  // Normalize path (remove query params, trailing slashes)
-  const normalizedPath = path.split('?')[0].replace(/\/$/, '');
+  // Normalize path (remove query params, trailing slashes, /api prefix)
+  let normalizedPath = path.split('?')[0].replace(/\/$/, '');
+  if (normalizedPath.startsWith('/api/')) {
+    normalizedPath = normalizedPath.slice(4);
+  } else if (normalizedPath === '/api') {
+    normalizedPath = '/';
+  }
   
   // Check exact match
   if (PUBLIC_ROUTES.includes(normalizedPath)) {

@@ -119,15 +119,20 @@ app.get('/health', (req, res) => {
 // Only accept from localhost or same host; in production use a shared secret if needed
 app.use(express.json());
 app.post('/broadcast', (req, res) => {
-  const { event, data } = req.body || {};
+  const { event, data, room } = req.body || {};
   if (!event || !io) {
     return res.status(400).json({ success: false, error: 'event required and io must be set' });
   }
   try {
     const clientCount = io.sockets.sockets.size;
-    console.log('[WebSocket] Broadcast', event, { storeId: data?.storeId, connectedClients: clientCount });
-    io.emit(event, data || {});
-    res.json({ success: true, event });
+    const targetRoom = room || data?.room || null;
+    console.log('[WebSocket] Broadcast', event, { storeId: data?.storeId, room: targetRoom, connectedClients: clientCount });
+    if (targetRoom) {
+      io.to(targetRoom).emit(event, data || {});
+    } else {
+      io.emit(event, data || {});
+    }
+    res.json({ success: true, event, room: targetRoom });
   } catch (err) {
     console.error('[WebSocket] Broadcast error:', err);
     res.status(500).json({ success: false, error: err.message });
@@ -168,6 +173,24 @@ io.on('connection', (socket) => {
     userAgent: clientInfo.userAgent
   });
   console.log(`[WebSocket] Total connected clients: ${connectedClients.size}`);
+
+  // One-day delivery notifications: join store / employee / admin rooms
+  socket.on('one-day-subscribe', (payload) => {
+    const { storeId, employeeId, role } = payload || {};
+    if (storeId != null) {
+      socket.join(`one-day-store-${storeId}`);
+      console.log(`[WebSocket] ${clientId} joined one-day-store-${storeId}`);
+    }
+    if (employeeId != null) {
+      socket.join(`one-day-employee-${employeeId}`);
+      console.log(`[WebSocket] ${clientId} joined one-day-employee-${employeeId}`);
+    }
+    if (role === 'admin') {
+      socket.join('one-day-admin');
+      console.log(`[WebSocket] ${clientId} joined one-day-admin`);
+    }
+    socket.emit('one-day-subscribed', { storeId, employeeId, role });
+  });
 
   // Handle client type identification
   socket.on('client-type', (type) => {

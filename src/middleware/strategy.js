@@ -12,6 +12,13 @@ const JWTSign = function(iss, user, date){
     }, config.app.secret);
 };
 
+exports.optionalJwtStrategy = (req, res, next) => {
+    passport.authenticate('user-jwt', { session: false }, (err, user) => {
+        if (user) req.user = user;
+        next();
+    })(req, res, next);
+};
+
 exports.jwtStrategy = (req, res, next) => {
     passport.authenticate('user-jwt', {session: false}, (err, user, info) => { 
         // Prefer JSON responses for API routes.

@@ -35,6 +35,11 @@ module.exports = (sequelize, DataTypes) => {
         allowNull: false,
         unique: true,
       },
+      productSku: {
+        type: DataTypes.STRING(64),
+        allowNull: true,
+        unique: true,
+      },
       brand: DataTypes.STRING,
       unitSize: DataTypes.STRING,
       status: {
@@ -64,7 +69,53 @@ module.exports = (sequelize, DataTypes) => {
       grandTotal: DataTypes.DECIMAL(10, 2),
       size: DataTypes.STRING,
       weight: DataTypes.STRING,
+      height: DataTypes.STRING,
       sizeUnitSizeMap: DataTypes.JSON,
+      isOneDayEnabled: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      },
+      oneDayPrice: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+      },
+      oneDayMaxQty: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+      },
+      oneDayTrialOnly: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      },
+      oneDayTrialPrice: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+      },
+      isRentalEnabled: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      },
+      rentalPricePerHour: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+      },
+      rentalPricePerDay: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+      },
+      rentalMinDurationHours: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        defaultValue: 1,
+      },
+      rentalMaxDurationDays: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        defaultValue: 30,
+      },
     },
     {}
   );

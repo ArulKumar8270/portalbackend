@@ -10,7 +10,9 @@ module.exports = {
     'Orders',
     'Inventory',
     'Billing',
-    "Settings"
+    "Settings",
+    'OneDayDelivery',
+    'RentalStore',
   ],
   
   DEFAULT_MENU_ITEMS: [
@@ -24,7 +26,9 @@ module.exports = {
     { key: 'Orders', name: 'Orders' },
     { key: 'Inventory', name: 'Inventory' },
     { key: 'Billing', name: 'Billing' },
-    { key: 'Settings', name: 'Settings' }
+    { key: 'Settings', name: 'Settings' },
+    { key: 'OneDayDelivery', name: 'One-Day Delivery' },
+    { key: 'RentalStore', name: 'Rental Store' },
   ]
 };
 

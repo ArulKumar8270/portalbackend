@@ -40,17 +40,26 @@ function getStartDateForPeriod(period) {
 
 /**
  * Get visitor reports: total site visits + per-store visit counts (auth required).
- * Query params: period (day|week|month), storeName (optional search).
+ * Query params:
+ * - period (day|week|month)
+ * - storeName (optional search)
+ * - storeId (optional exact match; useful for seller statistics)
  */
 async function getVisitReports(req, res, next) {
   try {
     const { Op } = db.Sequelize;
     const period = (req.query.period || "").toLowerCase();
     const storeNameSearch = (req.query.storeName || "").trim();
+    const storeIdRaw = req.query.storeId ?? req.query.store_id ?? null;
+    const storeId = storeIdRaw != null && String(storeIdRaw).trim() !== ""
+      ? Number(storeIdRaw)
+      : null;
 
-    const dateCondition = period && ["day", "week", "month"].includes(period)
-      ? { createdAt: { [Op.gte]: getStartDateForPeriod(period) } }
-      : {};
+    const startDate = period && ["day", "week", "month"].includes(period)
+      ? getStartDateForPeriod(period)
+      : null;
+
+    const dateCondition = startDate ? { createdAt: { [Op.gte]: startDate } } : {};
 
     const baseVisitWhere = { ...dateCondition };
 
@@ -58,6 +67,10 @@ async function getVisitReports(req, res, next) {
     const siteTotal = await db.storeVisit.count({ where: siteWhere });
 
     let storeIdsFilter = null;
+    if (storeId != null && Number.isFinite(storeId) && storeId > 0) {
+      storeIdsFilter = [storeId];
+    }
+
     if (storeNameSearch) {
       const escaped = String(storeNameSearch)
         .replace(/\\/g, "\\\\")
@@ -71,11 +84,12 @@ async function getVisitReports(req, res, next) {
         attributes: ["id"],
         raw: true,
       });
-      storeIdsFilter = stores.map((s) => s.id);
+      const nameMatches = stores.map((s) => s.id);
+      storeIdsFilter = storeIdsFilter ? storeIdsFilter.filter((id) => nameMatches.includes(id)) : nameMatches;
       if (storeIdsFilter.length === 0) {
         return res.json({
           success: true,
-          data: { siteVisitCount: siteTotal, storeVisits: [] },
+          data: { siteVisitCount: siteTotal, storeVisitCount: 0, storeVisits: [] },
         });
       }
     }
@@ -124,10 +138,64 @@ async function getVisitReports(req, res, next) {
       );
     }
 
+    let storeVisitCount = null;
+    if (storeId != null && Number.isFinite(storeId) && storeId > 0) {
+      const row = storeVisits.find((r) => Number(r.storeId) === Number(storeId));
+      storeVisitCount = row ? Number(row.visitCount || 0) : 0;
+    }
+
+    // Extra seller-friendly summary fields (only when a single storeId is requested)
+    let orderCount = null;
+    let productCount = null;
+    let dailyVisits = null;
+    if (storeId != null && Number.isFinite(storeId) && storeId > 0) {
+      const ordersWhere = {
+        storeId: Number(storeId),
+        ...(startDate ? { createdAt: { [Op.gte]: startDate } } : {}),
+      };
+      orderCount = await db.orders.count({ where: ordersWhere }).catch(() => 0);
+
+      // Count distinct products mapped to this store
+      const prodRow = await db.store_product.findOne({
+        attributes: [
+          [db.sequelize.fn("COUNT", db.sequelize.fn("DISTINCT", db.sequelize.col("productId"))), "cnt"],
+        ],
+        where: { supplierId: Number(storeId) },
+        raw: true,
+      }).catch(() => null);
+      productCount = Number(prodRow?.cnt || 0);
+
+      // Daily visit counts (for chart)
+      const dayExpr = db.sequelize.fn("DATE", db.sequelize.col("createdAt"));
+      const dailyWhere = {
+        storeId: Number(storeId),
+        ...(startDate ? { createdAt: { [Op.gte]: startDate } } : {}),
+      };
+      const dailyRows = await db.storeVisit.findAll({
+        attributes: [
+          [dayExpr, "day"],
+          [db.sequelize.fn("COUNT", db.sequelize.col("id")), "count"],
+        ],
+        where: dailyWhere,
+        group: [dayExpr],
+        order: [[dayExpr, "ASC"]],
+        raw: true,
+      }).catch(() => []);
+
+      dailyVisits = (dailyRows || []).map((r) => ({
+        day: r.day ? String(r.day).slice(0, 10) : null,
+        count: Number(r.count || 0),
+      })).filter((r) => r.day);
+    }
+
     return res.json({
       success: true,
       data: {
         siteVisitCount: siteTotal,
+        storeVisitCount,
+        orderCount,
+        productCount,
+        dailyVisits,
         storeVisits,
       },
     });

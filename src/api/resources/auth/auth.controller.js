@@ -31,7 +31,7 @@ function JWTSign(user, date) {
       sub: user.id,
       iam: user.type,
       iat: date.getTime(),
-      exp: Number(new Date(now.getTime() + 24 * 60 * 60 * 1000)),
+      exp: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).getTime(),
     },
     config.app.secret
   );

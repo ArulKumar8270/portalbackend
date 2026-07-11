@@ -22,6 +22,8 @@ const subUserRouter = require("./resources/subUser").subUserRouter;
 const invoiceFormatRouter = require("./resources/invoiceFormat").invoiceFormatRouter;
 const { appRouter } = require("./resources/app/app.router");
 const { shiprocketRouter } = require("./resources/shiprocket");
+const { oneDayRouter } = require("./resources/one-day");
+const { rentalRouter } = require("./resources/rental");
 
 // Import authentication middleware
 const { requireAuth } = require("../middleware/requireAuth");
@@ -54,6 +56,8 @@ restRouter.use("/inventory", inventoryRouter);
 restRouter.use("/auth/sub-users", subUserRouter);
 restRouter.use("/invoice-formats", invoiceFormatRouter);
 restRouter.use("/shiprocket", shiprocketRouter);
+restRouter.use("/one-day", oneDayRouter);
+restRouter.use("/rental", rentalRouter);
 restRouter.use("/app", appRouter);
 
 module.exports = { restRouter };

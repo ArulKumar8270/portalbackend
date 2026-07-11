@@ -125,6 +125,140 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.STRING,
         allowNull: true,
       },
+      oneDayDeliveryEnabled: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      },
+      maxDeliveryRadiusKm: {
+        type: DataTypes.DECIMAL(8, 2),
+        allowNull: true,
+        defaultValue: 10,
+      },
+      workingHours: {
+        type: DataTypes.JSON,
+        allowNull: true,
+      },
+      holidayDates: {
+        type: DataTypes.JSON,
+        allowNull: true,
+      },
+      cutoffTime: {
+        type: DataTypes.STRING,
+        allowNull: true,
+        defaultValue: "14:00",
+      },
+      deliveryChargeSlabs: {
+        type: DataTypes.JSON,
+        allowNull: true,
+      },
+      storeLatitude: {
+        type: DataTypes.DECIMAL(10, 7),
+        allowNull: true,
+      },
+      storeLongitude: {
+        type: DataTypes.DECIMAL(10, 7),
+        allowNull: true,
+      },
+      sameDayPromiseText: {
+        type: DataTypes.STRING,
+        allowNull: true,
+        defaultValue: "Today by 8 PM",
+      },
+      nextDayPromiseText: {
+        type: DataTypes.STRING,
+        allowNull: true,
+        defaultValue: "Tomorrow by 2 PM",
+      },
+      requireDeliveryOtp: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: true,
+      },
+      requireDeliveryPhoto: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: true,
+      },
+      requireDeliverySignature: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      },
+      oneDayPaymentQrUrl: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+      },
+      oneDayUpiId: {
+        type: DataTypes.STRING,
+        allowNull: true,
+      },
+      oneDayReturnPolicyUrl: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+      },
+      oneDayReturnPolicyText: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+      },
+      oneDayPaymentReturnNote: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+      },
+      rentalEnabled: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      },
+      rentalBillingMode: {
+        type: DataTypes.STRING(20),
+        allowNull: true,
+        defaultValue: 'auto',
+      },
+      rentalAdvancePercent: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        defaultValue: 30,
+      },
+      rentalMinLeadTimeHours: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        defaultValue: 2,
+      },
+      rentalMaxAdvanceBookingDays: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        defaultValue: 90,
+      },
+      rentalWorkingHours: {
+        type: DataTypes.JSON,
+        allowNull: true,
+      },
+      rentalHolidayDates: {
+        type: DataTypes.JSON,
+        allowNull: true,
+      },
+      rentalTermsUrl: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+      },
+      rentalCancellationPolicy: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+      },
+      rentalPaymentQrUrl: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+      },
+      rentalUpiId: {
+        type: DataTypes.STRING(120),
+        allowNull: true,
+      },
+      rentalRequireIdProof: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: true,
+      },
     },
     {}
   );
@@ -143,6 +277,7 @@ module.exports = (sequelize, DataTypes) => {
     Store.hasMany(models.productFeedback, { foreignKey: 'storeId' });
     models.store.hasMany(models.user, { foreignKey: "storeId" }); // A vendor can have multiple users
     models.store.hasMany(models.product, { foreignKey: "createdId" });
+    Store.hasMany(models.store_employees, { foreignKey: "storeId" });
   };
 
   return Store;

@@ -1203,70 +1203,123 @@ module.exports = {
       }
     }
     try {
-      const { search, paymentModes } = req.query; // Extract filters from query parameters
-
-      // Initialize filter conditions for products
-      const productWhere = {};
+      const { search, paymentModes } = req.query;
+      const Op = db.Sequelize.Op;
       const paymentModeArray = paymentModes
         ? paymentModes.split(",").map((pm) => parseInt(pm.trim(), 10))
-        : []; // Ensure integers
+        : [];
 
-      // Apply filter by product name if provided
-      if (search) {
-        productWhere.name = {
-          [db.Sequelize.Op.like]: `%${search}%`,
-        };
+      const searchTerm = search ? String(search).trim() : '';
+      const hasSearch = searchTerm.length > 0;
+      const hasPayment = paymentModeArray.length > 0;
+
+      // Product-based matches (product name and/or payment mode)
+      const productWhere = {};
+      if (hasSearch) {
+        productWhere.name = { [Op.like]: `%${searchTerm}%` };
       }
-
-      // Apply filter by payment modes if provided
-      if (paymentModes) {
+      if (hasPayment) {
         productWhere.paymentMode = {
-          [db.Sequelize.Op.or]: paymentModeArray.map((mode) => ({
-            [db.Sequelize.Op.like]: `%${mode}%`,
+          [Op.or]: paymentModeArray.map((mode) => ({
+            [Op.like]: `%${mode}%`,
           })),
         };
       }
 
-      // Find all product IDs that match the filters
-      const products = await db.product.findAll({
-        where: productWhere,
-        attributes: ["id"],
-      });
+      let productMatchedStoreIds = [];
+      if (hasSearch || hasPayment) {
+        const products = await db.product.findAll({
+          where: productWhere,
+          attributes: ["id"],
+        });
+        const productIds = products.map((p) => p.id);
+        if (productIds.length > 0) {
+          const linked = await db.store_product.findAll({
+            where: { productId: { [Op.in]: productIds } },
+            attributes: ["supplierId"],
+            raw: true,
+          });
+          productMatchedStoreIds = [
+            ...new Set(linked.map((r) => r.supplierId).filter((id) => id != null)),
+          ];
+        }
+      }
 
-      const productIds = products.map((product) => product.id);
+      // Store name matches (store view: search by store name OR product)
+      let nameMatchedStoreIds = [];
+      if (hasSearch) {
+        const named = await db.store.findAll({
+          where: {
+            status: "1",
+            [Op.or]: [
+              { storename: { [Op.like]: `%${searchTerm}%` } },
+              { storedesc: { [Op.like]: `%${searchTerm}%` } },
+              { ownername: { [Op.like]: `%${searchTerm}%` } },
+            ],
+          },
+          attributes: ["id"],
+          raw: true,
+        });
+        nameMatchedStoreIds = named.map((s) => s.id);
+      }
 
-      // Check if productIds is empty
-      if (productIds.length === 0) {
+      let storeIds = [];
+      if (hasPayment && hasSearch) {
+        // Payment filter must hold; search can match product or store name
+        const paymentProducts = await db.product.findAll({
+          where: {
+            paymentMode: {
+              [Op.or]: paymentModeArray.map((mode) => ({
+                [Op.like]: `%${mode}%`,
+              })),
+            },
+          },
+          attributes: ["id"],
+        });
+        const paymentProductIds = paymentProducts.map((p) => p.id);
+        let paymentStoreIds = [];
+        if (paymentProductIds.length) {
+          const linked = await db.store_product.findAll({
+            where: { productId: { [Op.in]: paymentProductIds } },
+            attributes: ["supplierId"],
+            raw: true,
+          });
+          paymentStoreIds = [...new Set(linked.map((r) => r.supplierId).filter((id) => id != null))];
+        }
+        const searchIds = new Set([...productMatchedStoreIds, ...nameMatchedStoreIds]);
+        storeIds = [...searchIds].filter((id) => paymentStoreIds.includes(id));
+      } else if (hasPayment) {
+        storeIds = productMatchedStoreIds;
+      } else if (hasSearch) {
+        storeIds = [...new Set([...productMatchedStoreIds, ...nameMatchedStoreIds])];
+      }
+
+      if ((hasSearch || hasPayment) && storeIds.length === 0) {
         return res.status(200).json({ success: true, data: [], count: 0 });
       }
 
-      // Find all stores that are associated with those products and get their product count
+      const storeWhere = { status: "1" };
+      if (storeIds.length > 0) {
+        storeWhere.id = { [Op.in]: storeIds };
+      }
+
       const stores = await db.store.findAll({
         attributes: [
           'id', 'storename', 'status', 'storeaddress', 'storedesc', 'ownername', 'owneraddress', 'email', 'phone', 'accountNo', 'accountHolderName', 'IFSC', 'bankName', 'branch', 'adharCardNo', 'panCardNo', 'GSTNo', 'areaId', 'website', 'openTime', 'closeTime', 'location', 'storeImage', 'verifyDocument',
-          // Add the count of associated products as 'totalProducts'
           [db.Sequelize.fn('COUNT', db.Sequelize.col('store_products.productId')), 'totalProducts']
         ],
         include: [
           {
             model: db.store_product,
-            attributes: [], // No need to fetch attributes from store_product itself
-            where: {
-              productId: {
-                [db.Sequelize.Op.in]: productIds,
-              },
-            },
-            required: true // Ensures only stores with matching products are returned (INNER JOIN)
+            attributes: [],
+            required: false,
           },
         ],
         group: [
-          // All non-aggregated attributes from the 'attributes' array must be in the 'group' clause
           'store.id', 'store.storename', 'store.status', 'store.storeaddress', 'store.storedesc', 'store.ownername', 'store.owneraddress', 'store.email', 'store.phone', 'store.accountNo', 'store.accountHolderName', 'store.IFSC', 'store.bankName', 'store.branch', 'store.adharCardNo', 'store.panCardNo', 'store.GSTNo', 'store.areaId', 'store.website', 'store.openTime', 'store.closeTime', 'store.location', 'store.storeImage', 'store.verifyDocument'
         ],
-        raw: true, // Return raw data to easily access the 'totalProducts' alias,
-        where: {
-          status: "1"
-        },
+        raw: true,
+        where: storeWhere,
       });
 
       const storesWithDistance = stores.map(store => {
@@ -1274,18 +1327,17 @@ module.exports = {
           const storeCoords = extractLatLngFromGoogleMapsUrl(store.location);
           if (storeCoords) {
             const distance = haversineDistance(userLat, userLon, storeCoords.lat, storeCoords.lon);
-            return { ...store, distance: parseFloat(distance.toFixed(2)) }; // Round to 2 decimal places
+            return { ...store, distance: parseFloat(distance.toFixed(2)) };
           }
         }
-        return { ...store, distance: null }; // Set distance to null if not calculable
+        return { ...store, distance: null };
       });
 
-      // Sort by distance: nearest first, then stores with null distance at the end
       const sortedStores = storesWithDistance.sort((a, b) => {
         if (a.distance === null && b.distance === null) return 0;
-        if (a.distance === null) return 1; // Put null distances at the end
-        if (b.distance === null) return -1; // Put null distances at the end
-        return a.distance - b.distance; // Sort by distance ascending (nearest first)
+        if (a.distance === null) return 1;
+        if (b.distance === null) return -1;
+        return a.distance - b.distance;
       });
 
       const totalCount = sortedStores.length;

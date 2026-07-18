@@ -91,13 +91,15 @@ const {
 } = require('../../../utils/googleMapsCoords');
 
 function getEffectiveMaxRadiusKm(store) {
+  // Prefer the store setting; only fall back to slabs / default when unset.
+  const saved = Number(store.maxDeliveryRadiusKm) || 0;
+  if (saved > 0) return saved;
   const slabs = parseJson(store.deliveryChargeSlabs, []);
   const maxSlab =
     Array.isArray(slabs) && slabs.length
       ? Math.max(...slabs.map((s) => Number(s?.toKm) || 0))
       : 0;
-  const saved = Number(store.maxDeliveryRadiusKm) || 0;
-  return Math.max(maxSlab, saved, 10);
+  return maxSlab > 0 ? maxSlab : 10;
 }
 
 function parseAddressCoords(address) {

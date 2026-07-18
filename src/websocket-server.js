@@ -20,7 +20,13 @@ const WS_USE_HTTPS = process.env.WS_USE_HTTPS === 'true' || NODE_ENV === 'produc
 // Allowed origins for CORS (production domain)
 const ALLOWED_ORIGINS = process.env.WS_ALLOWED_ORIGINS 
   ? process.env.WS_ALLOWED_ORIGINS.split(',')
-  : ['https://admin.nicknameportal.shop', 'http://localhost:5173', 'http://localhost:3000', '*'];
+  : [
+      'https://admin.nicknameportal.shop',
+      'http://localhost:5173',
+      'http://localhost:5174',
+      'http://localhost:3000',
+      '*',
+    ];
 
 let lastBarcode = '';
 let lastScanTime = null;
@@ -190,6 +196,24 @@ io.on('connection', (socket) => {
       console.log(`[WebSocket] ${clientId} joined one-day-admin`);
     }
     socket.emit('one-day-subscribed', { storeId, employeeId, role });
+  });
+
+  // Rental booking notifications: join store / customer / admin rooms
+  socket.on('rental-subscribe', (payload) => {
+    const { storeId, customerId, role } = payload || {};
+    if (storeId != null) {
+      socket.join(`rental-store-${storeId}`);
+      console.log(`[WebSocket] ${clientId} joined rental-store-${storeId}`);
+    }
+    if (customerId != null) {
+      socket.join(`rental-customer-${customerId}`);
+      console.log(`[WebSocket] ${clientId} joined rental-customer-${customerId}`);
+    }
+    if (role === 'admin') {
+      socket.join('rental-admin');
+      console.log(`[WebSocket] ${clientId} joined rental-admin`);
+    }
+    socket.emit('rental-subscribed', { storeId, customerId, role });
   });
 
   // Handle client type identification

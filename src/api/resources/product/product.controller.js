@@ -268,6 +268,10 @@ module.exports = {
       const limitRaw = parseInt(req.query.limit, 10);
       const limit = Math.min(Math.max(limitRaw || 20, 1), 100);
       const offset = (page - 1) * limit;
+      const oneDay =
+        ['1', 'true', 'yes'].includes(String(req.query.oneDay || '').toLowerCase());
+      const rental =
+        ['1', 'true', 'yes'].includes(String(req.query.rental || '').toLowerCase());
 
       // Build where clause
       const whereClause = { status: 1 };
@@ -288,6 +292,18 @@ module.exports = {
 
       if (categoryId) {
         whereClause.categoryId = parseInt(categoryId);
+      }
+
+      if (oneDay) {
+        whereClause[Op.or] = [
+          { isOneDayEnabled: true },
+          { oneDayTrialOnly: true },
+          { oneDayPrice: { [Op.gt]: 0 } },
+        ];
+      }
+
+      if (rental) {
+        whereClause.isRentalEnabled = true;
       }
 
       const [products, totalCount] = await Promise.all([
@@ -926,9 +942,29 @@ module.exports = {
       if (paymentModes.length > 0) {
         productWhere.paymentMode = {
           [db.Sequelize.Op.or]: paymentModes.map((mode) => ({
-            [db.Sequelize.Op.like]: `%${mode}%`,
+            [Op.like]: `%${mode}%`,
           })),
         };
+      }
+
+      const oneDay =
+        ['1', 'true', 'yes'].includes(String(req.query.oneDay || '').toLowerCase());
+      const rental =
+        ['1', 'true', 'yes'].includes(String(req.query.rental || '').toLowerCase());
+      if (oneDay) {
+        productWhere[Op.and] = [
+          ...(productWhere[Op.and] || []),
+          {
+            [Op.or]: [
+              { isOneDayEnabled: true },
+              { oneDayTrialOnly: true },
+              { oneDayPrice: { [Op.gt]: 0 } },
+            ],
+          },
+        ];
+      }
+      if (rental) {
+        productWhere.isRentalEnabled = true;
       }
 
       if (flat) {
@@ -990,19 +1026,37 @@ module.exports = {
       const limitRaw = parseInt(req.query.limit, 10);
       const limit = Math.min(Math.max(limitRaw || 20, 1), 100);
       const offset = (page - 1) * limit;
+      const oneDay =
+        ['1', 'true', 'yes'].includes(String(req.query.oneDay || '').toLowerCase());
+      const rental =
+        ['1', 'true', 'yes'].includes(String(req.query.rental || '').toLowerCase());
 
       // Ensure categoryIds is an array, even if a single ID is passed
       const categoryArray = Array.isArray(categoryIds)
         ? categoryIds
         : categoryIds.split(",");
 
+      const where = {
+        categoryId: {
+          [db.Sequelize.Op.in]: categoryArray,
+        },
+      };
+
+      if (oneDay) {
+        where[Op.or] = [
+          { isOneDayEnabled: true },
+          { oneDayTrialOnly: true },
+          { oneDayPrice: { [Op.gt]: 0 } },
+        ];
+      }
+
+      if (rental) {
+        where.isRentalEnabled = true;
+      }
+
       // Find all products that belong to the specified categories
       const result = await db.product.findAndCountAll({
-        where: {
-          categoryId: {
-            [db.Sequelize.Op.in]: categoryArray,
-          },
-        },
+        where,
         order: [["createdAt", "DESC"]],
         limit,
         offset,

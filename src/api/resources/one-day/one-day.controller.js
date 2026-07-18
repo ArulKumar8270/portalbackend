@@ -222,10 +222,16 @@ module.exports = {
         email: b.email || null,
         password: hash,
         role: b.role || 'rider',
-        status: 'active',
+        status: b.status === 'inactive' ? 'inactive' : 'active',
         isOnDuty: !!b.isOnDuty,
         maxActiveOrders: b.maxActiveOrders || 3,
         vehicleType: b.vehicleType || null,
+        payType: b.payType || 'per_order',
+        payRate: b.payRate != null && b.payRate !== '' ? Number(b.payRate) : null,
+        petrolPrice:
+          b.payType === 'per_km' && b.petrolPrice != null && b.petrolPrice !== ''
+            ? Number(b.petrolPrice)
+            : null,
       });
       res.status(201).json({ success: true, data: sanitizeEmployee(row) });
     } catch (e) {
@@ -240,9 +246,22 @@ module.exports = {
       if (!row) return res.status(404).json({ success: false, message: 'Employee not found' });
       const b = req.body || {};
       const patch = {};
-      ['name', 'phone', 'email', 'role', 'status', 'isOnDuty', 'maxActiveOrders', 'vehicleType'].forEach((f) => {
+      ['name', 'phone', 'email', 'role', 'status', 'isOnDuty', 'maxActiveOrders', 'vehicleType', 'payType', 'payRate', 'petrolPrice'].forEach((f) => {
         if (b[f] !== undefined) patch[f] = b[f];
       });
+      if (b.payRate !== undefined) {
+        patch.payRate = b.payRate != null && b.payRate !== '' ? Number(b.payRate) : null;
+      }
+      if (b.petrolPrice !== undefined || b.payType === 'per_km') {
+        patch.petrolPrice =
+          (b.payType || row.payType) === 'per_km' &&
+          b.petrolPrice != null &&
+          b.petrolPrice !== ''
+            ? Number(b.petrolPrice)
+            : b.payType && b.payType !== 'per_km'
+              ? null
+              : patch.petrolPrice;
+      }
       if (b.password) patch.password = bcrypt.hashSync(String(b.password));
       await row.update(patch);
       res.json({ success: true, data: sanitizeEmployee(row) });

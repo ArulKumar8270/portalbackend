@@ -26,6 +26,10 @@ const {
   quoteExtension,
 } = require('./rental.service');
 const { buildStoreReport, buildAdminReport, bookingsToCsv } = require('./rental.reports.service');
+const {
+  notifyRentalBookingCreated,
+  notifyRentalBookingStatus,
+} = require('./rental.notify');
 
 function getCustomerUserId(req) {
   const u = req.user || {};
@@ -714,6 +718,7 @@ module.exports = {
       }
 
       await logRentalEvent(order.id, 'pending_approval', 'Booking submitted with Razorpay advance payment');
+      notifyRentalBookingCreated(order, { bookerName: b.bookerName }).catch(() => {});
       res.json({
         success: true,
         message: 'Booking submitted. Store will review your booking.',
@@ -842,6 +847,10 @@ module.exports = {
         { replacements: { orderId: order.id } }
       );
       await logRentalEvent(order.id, 'confirmed', 'Approved by store');
+      notifyRentalBookingStatus(order, 'confirmed', {
+        title: 'Rental booking confirmed',
+        message: `Your rental booking #${order.id} was approved`,
+      }).catch(() => {});
       res.json({ success: true, message: 'Booking confirmed', data: order });
     } catch (e) {
       next(e);
@@ -861,6 +870,10 @@ module.exports = {
         { replacements: { orderId: order.id, reason } }
       );
       await logRentalEvent(order.id, 'rejected', reason);
+      notifyRentalBookingStatus(order, 'rejected', {
+        title: 'Rental booking rejected',
+        message: `Your rental booking #${order.id} was rejected`,
+      }).catch(() => {});
       res.json({ success: true, message: 'Booking rejected' });
     } catch (e) {
       next(e);
@@ -1316,13 +1329,22 @@ module.exports = {
       const rows = await db.orders.findAll({ where, order: [['id', 'DESC']] });
       const data = rows.map((r) => {
         const j = r.get({ plain: true });
+        const totalAmount = j.rentalTotalAmount ?? j.grandtotal ?? 0;
+        const advanceAmount = j.rentalAdvanceAmount ?? 0;
+        const balanceAmount = j.rentalBalanceAmount ?? 0;
         return {
           orderId: j.id,
+          id: j.id,
           createdAt: j.createdAt,
           rentalStatus: j.rentalStatus,
-          totalAmount: j.rentalTotalAmount,
-          advanceAmount: j.rentalAdvanceAmount,
-          balanceAmount: j.rentalBalanceAmount,
+          totalAmount,
+          advanceAmount,
+          balanceAmount,
+          // Aliases for app / dashboard clients
+          rentalTotalAmount: totalAmount,
+          rentalAdvanceAmount: advanceAmount,
+          rentalBalanceAmount: balanceAmount,
+          grandtotal: totalAmount,
           balancePaidAt: j.rentalBalancePaidAt,
           damageAmount: j.rentalDamageAmount,
         };

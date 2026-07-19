@@ -8,6 +8,7 @@ module.exports = (sequelize, DataTypes) => {
       employeeId: { type: DataTypes.INTEGER, allowNull: true },
       photoUrl: { type: DataTypes.TEXT, allowNull: true },
       signatureUrl: { type: DataTypes.TEXT, allowNull: true },
+      paymentPhotoUrl: { type: DataTypes.TEXT, allowNull: true },
       otpVerifiedAt: { type: DataTypes.DATE, allowNull: true },
     },
     {}

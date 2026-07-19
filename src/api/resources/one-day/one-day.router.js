@@ -17,7 +17,15 @@ function employeeAuth(req, res, next) {
     if (String(decoded.iam) !== 'employee') {
       return res.status(403).json({ success: false, message: 'Employee token required' });
     }
-    req.employee = { id: decoded.sub, storeId: decoded.storeId };
+    const id = Number(decoded.sub);
+    const storeId = Number(decoded.storeId);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(401).json({ success: false, message: 'Invalid employee token' });
+    }
+    req.employee = {
+      id,
+      storeId: Number.isFinite(storeId) && storeId > 0 ? storeId : null,
+    };
     next();
   } catch {
     return res.status(401).json({ success: false, message: 'Invalid token' });
@@ -45,6 +53,7 @@ oneDayRouter.patch('/employees/:id/duty', jwtStrategy, controller.toggleDuty);
 // Employee mobile
 oneDayRouter.post('/employee/login', controller.employeeLogin);
 oneDayRouter.get('/employee/orders', employeeAuth, controller.employeeOrders);
+oneDayRouter.get('/employee/orders/history', employeeAuth, controller.employeeOrderHistory);
 oneDayRouter.get('/employee/orders/:id', employeeAuth, controller.employeeOrderDetail);
 oneDayRouter.post('/employee/location', employeeAuth, controller.employeeLocation);
 
@@ -58,7 +67,15 @@ function storeOrEmployeeAuth(req, res, next) {
     try {
       const decoded = JWT.verify(auth.slice(7), config.app.secret);
       if (String(decoded.iam) === 'employee') {
-        req.employee = { id: decoded.sub, storeId: decoded.storeId };
+        const id = Number(decoded.sub);
+        const storeId = Number(decoded.storeId);
+        if (!Number.isFinite(id) || id <= 0) {
+          return res.status(401).json({ success: false, message: 'Invalid employee token' });
+        }
+        req.employee = {
+          id,
+          storeId: Number.isFinite(storeId) && storeId > 0 ? storeId : null,
+        };
         return next();
       }
     } catch {

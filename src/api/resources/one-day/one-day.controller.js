@@ -20,8 +20,8 @@ function employeeToken(employee) {
   return JWT.sign(
     {
       iss: config.app.name,
-      sub: employee.id,
-      storeId: employee.storeId,
+      sub: Number(employee.id),
+      storeId: Number(employee.storeId),
       iam: 'employee',
       exp: Math.floor(Date.now() / 1000) + 24 * 60 * 60,
     },
@@ -29,11 +29,38 @@ function employeeToken(employee) {
   );
 }
 
+/** Digits-only phone for matching (handles +91 / leading 0). */
+function normalizePhoneDigits(phone) {
+  let p = String(phone || '').replace(/\D/g, '');
+  if (p.startsWith('91') && p.length === 12) p = p.slice(2);
+  if (p.startsWith('0') && p.length === 11) p = p.slice(1);
+  return p;
+}
+
+function phoneMatchVariants(phone) {
+  const raw = String(phone || '').trim();
+  const digits = normalizePhoneDigits(raw);
+  const variants = new Set();
+  if (raw) variants.add(raw);
+  if (digits) {
+    variants.add(digits);
+    variants.add(`+91${digits}`);
+    variants.add(`91${digits}`);
+    variants.add(`0${digits}`);
+  }
+  return [...variants];
+}
+
 function getEmployeeFromReq(req) {
-  if (req.employee) return req.employee;
-  const u = req.user || {};
-  if (String(u.iam) === 'employee') return { id: u.sub, storeId: u.storeId };
-  return null;
+  const raw = req.employee || (String(req.user?.iam) === 'employee' ? req.user : null);
+  if (!raw) return null;
+  const id = Number(raw.id ?? raw.sub);
+  const storeId = Number(raw.storeId);
+  if (!Number.isFinite(id) || id <= 0) return null;
+  return {
+    id,
+    storeId: Number.isFinite(storeId) && storeId > 0 ? storeId : null,
+  };
 }
 
 function getCustomerUserId(req) {
@@ -215,10 +242,11 @@ module.exports = {
         return res.status(400).json({ success: false, message: 'storeId, name, phone, password required' });
       }
       const hash = bcrypt.hashSync(String(b.password));
+      const phoneDigits = normalizePhoneDigits(b.phone);
       const row = await db.store_employees.create({
         storeId: b.storeId,
         name: b.name,
-        phone: b.phone,
+        phone: phoneDigits || String(b.phone).trim(),
         email: b.email || null,
         password: hash,
         role: b.role || 'rider',
@@ -249,6 +277,10 @@ module.exports = {
       ['name', 'phone', 'email', 'role', 'status', 'isOnDuty', 'maxActiveOrders', 'vehicleType', 'payType', 'payRate', 'petrolPrice'].forEach((f) => {
         if (b[f] !== undefined) patch[f] = b[f];
       });
+      if (patch.phone != null) {
+        const digits = normalizePhoneDigits(patch.phone);
+        patch.phone = digits || String(patch.phone).trim();
+      }
       if (b.payRate !== undefined) {
         patch.payRate = b.payRate != null && b.payRate !== '' ? Number(b.payRate) : null;
       }
@@ -312,13 +344,51 @@ module.exports = {
   /** POST /one-day/employee/login */
   async employeeLogin(req, res, next) {
     try {
-      const { phone, password } = req.body || {};
-      const row = await db.store_employees.findOne({
-        where: { phone: String(phone), status: 'active' },
+      const { phone, password, storeId } = req.body || {};
+      if (!phone || password == null || String(password) === '') {
+        return res.status(400).json({ success: false, message: 'Phone and password required' });
+      }
+
+      const phoneVariants = phoneMatchVariants(phone);
+      const where = {
+        status: 'active',
+        phone: { [Op.in]: phoneVariants },
+      };
+      const sid = Number(storeId);
+      if (Number.isFinite(sid) && sid > 0) where.storeId = sid;
+
+      const candidates = await db.store_employees.findAll({ where, order: [['id', 'DESC']] });
+      const matched = candidates.filter((row) => {
+        try {
+          return bcrypt.compareSync(String(password), row.password);
+        } catch {
+          return false;
+        }
       });
-      if (!row || !bcrypt.compareSync(String(password), row.password)) {
+
+      if (!matched.length) {
         return res.status(401).json({ success: false, message: 'Invalid credentials' });
       }
+
+      // Prefer the employee who currently has active assigned orders (avoids wrong
+      // store when the same phone exists on multiple active employee rows).
+      let row = matched[0];
+      if (matched.length > 1) {
+        for (const candidate of matched) {
+          const activeCount = await db.orders.count({
+            where: {
+              deliveryType: 'one_day',
+              assignedEmployeeId: Number(candidate.id),
+              oneDayStatus: { [Op.notIn]: ['delivered', 'cancelled', 'failed'] },
+            },
+          });
+          if (activeCount > 0) {
+            row = candidate;
+            break;
+          }
+        }
+      }
+
       const token = employeeToken(row);
       res.json({ success: true, token, data: sanitizeEmployee(row) });
     } catch (e) {
@@ -331,17 +401,109 @@ module.exports = {
     try {
       const emp = getEmployeeFromReq(req);
       if (!emp) return res.status(401).json({ success: false, message: 'Employee auth required' });
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
+
+      const employeeId = Number(emp.id);
       const rows = await db.orders.findAll({
         where: {
           deliveryType: 'one_day',
-          assignedEmployeeId: emp.id,
+          assignedEmployeeId: employeeId,
           oneDayStatus: { [Op.notIn]: ['delivered', 'cancelled', 'failed'] },
         },
         order: [['id', 'DESC']],
       });
       res.json({ success: true, data: rows });
+    } catch (e) {
+      next(e);
+    }
+  },
+
+  /**
+   * GET /one-day/employee/orders/history
+   * Delivered / cancelled / failed report for the logged-in employee.
+   * Query: status=delivered|cancelled|failed|all  period=day|week|month|all
+   */
+  async employeeOrderHistory(req, res, next) {
+    try {
+      const emp = getEmployeeFromReq(req);
+      if (!emp) return res.status(401).json({ success: false, message: 'Employee auth required' });
+
+      const employeeId = Number(emp.id);
+      const statusRaw = String(req.query.status || 'delivered').toLowerCase();
+      const allowed = ['delivered', 'cancelled', 'failed', 'all'];
+      const status = allowed.includes(statusRaw) ? statusRaw : 'delivered';
+      const period = String(req.query.period || 'month').toLowerCase();
+
+      const where = {
+        deliveryType: 'one_day',
+        assignedEmployeeId: employeeId,
+      };
+      if (status === 'all') {
+        where.oneDayStatus = { [Op.in]: ['delivered', 'cancelled', 'failed'] };
+      } else {
+        where.oneDayStatus = status;
+      }
+
+      const range = getPeriodDateRange(period);
+      if (range) {
+        // Prefer delivery time for delivered; fall back to createdAt for others.
+        if (status === 'delivered') {
+          where.deliveredAt = { [Op.gte]: range.from, [Op.lte]: range.to };
+        } else if (status === 'all') {
+          where[Op.or] = [
+            { deliveredAt: { [Op.gte]: range.from, [Op.lte]: range.to } },
+            {
+              deliveredAt: null,
+              createdAt: { [Op.gte]: range.from, [Op.lte]: range.to },
+            },
+          ];
+        } else {
+          where.createdAt = { [Op.gte]: range.from, [Op.lte]: range.to };
+        }
+      }
+
+      const rows = await db.orders.findAll({
+        where,
+        order: [
+          ['deliveredAt', 'DESC'],
+          ['id', 'DESC'],
+        ],
+        limit: 300,
+      });
+
+      let deliveredCount = 0;
+      let cancelledCount = 0;
+      let failedCount = 0;
+      let totalCollected = 0;
+
+      const data = rows.map((row) => {
+        const json = row.get({ plain: true });
+        const st = String(json.oneDayStatus || '');
+        if (st === 'delivered') {
+          deliveredCount += 1;
+          totalCollected += Number(json.grandtotal || 0);
+        } else if (st === 'cancelled') {
+          cancelledCount += 1;
+        } else if (st === 'failed') {
+          failedCount += 1;
+        }
+        return {
+          ...json,
+          parsedAddress: parseDeliveryAddress(json.deliveryAddress),
+        };
+      });
+
+      res.json({
+        success: true,
+        data,
+        summary: {
+          total: data.length,
+          delivered: deliveredCount,
+          cancelled: cancelledCount,
+          failed: failedCount,
+          totalCollected,
+        },
+        filters: { status, period },
+      });
     } catch (e) {
       next(e);
     }
@@ -353,7 +515,11 @@ module.exports = {
       const emp = getEmployeeFromReq(req);
       if (!emp) return res.status(401).json({ success: false, message: 'Employee auth required' });
       const order = await db.orders.findOne({
-        where: { id: req.params.id, assignedEmployeeId: emp.id, deliveryType: 'one_day' },
+        where: {
+          id: Number(req.params.id),
+          assignedEmployeeId: Number(emp.id),
+          deliveryType: 'one_day',
+        },
       });
       if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
       const addr = parseDeliveryAddress(order.deliveryAddress);
@@ -611,6 +777,13 @@ module.exports = {
       });
       if (!created) {
         await proof.update({ paymentPhotoUrl, employeeId: emp.id });
+      }
+      await proof.reload();
+      if (!proof.paymentPhotoUrl) {
+        return res.status(500).json({
+          success: false,
+          message: 'Payment photo could not be saved. Please try again.',
+        });
       }
       res.json({
         success: true,

@@ -9,7 +9,7 @@ module.exports = {
    * Here you may specify the host address of database which will be
    * used for connection
    */
-  host: process.env.DB_HOST || "nicknameinfotech.com",
+  host: process.env.DB_HOST || "82.25.121.111",
 
   /**
    * Here you may specify the port of database which will be

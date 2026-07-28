@@ -33,5 +33,5 @@ module.exports = {
    * Here you may specify the password of database which will be
    * used for connection
    */
-  password: process.env.DB_PASSWORD || "Nicknameportal@2024",
+  password: process.env.DB_PASSWORD || "mQ9rjpQxyL~*",
 };

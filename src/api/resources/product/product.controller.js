@@ -33,6 +33,56 @@ function parseOptionalNumber(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+const VARIANT_KEY_SEP = "||";
+
+function parseVariantKey(key) {
+  const raw = String(key || "").trim();
+  const idx = raw.indexOf(VARIANT_KEY_SEP);
+  if (idx === -1) return { color: "", size: raw };
+  return {
+    color: raw.slice(0, idx).trim(),
+    size: raw.slice(idx + VARIANT_KEY_SEP.length).trim(),
+  };
+}
+
+/**
+ * Normalize sizeUnitSizeMap so color/size live on each entry.
+ * Supports legacy size-only keys and color||size composite keys.
+ */
+function normalizeSizeUnitSizeMap(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const normalized = {};
+  Object.entries(raw).forEach(([key, value]) => {
+    const parsedKey = parseVariantKey(key);
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const color = String(value.color ?? parsedKey.color ?? "").trim();
+      const size = String(value.size ?? parsedKey.size ?? key).trim();
+      const mapKey = color ? `${color}${VARIANT_KEY_SEP}${size}` : size || key;
+      normalized[mapKey] = {
+        ...value,
+        color,
+        size: size || key,
+      };
+    } else {
+      const size = parsedKey.size || key;
+      const color = parsedKey.color;
+      const mapKey = color ? `${color}${VARIANT_KEY_SEP}${size}` : size;
+      normalized[mapKey] = {
+        color,
+        size,
+        unitSize: String(value ?? ""),
+        qty: "1",
+        price: "",
+        discount: "0",
+        discountPer: "0",
+        total: "",
+        grandTotal: "",
+      };
+    }
+  });
+  return normalized;
+}
+
 function normalizeProductSku(value) {
   const sku = String(value ?? "").trim();
   return sku || null;
@@ -140,6 +190,7 @@ module.exports = {
           parsedSizeUnitSizeMap = typeof sizeUnitSizeMap === 'string' 
             ? JSON.parse(sizeUnitSizeMap) 
             : sizeUnitSizeMap;
+          parsedSizeUnitSizeMap = normalizeSizeUnitSizeMap(parsedSizeUnitSizeMap);
         } catch (e) {
           console.error("Error parsing sizeUnitSizeMap:", e);
         }
@@ -447,6 +498,7 @@ module.exports = {
                 } else {
                   parsedSizeUnitSizeMap = sizeUnitSizeMap;
                 }
+                parsedSizeUnitSizeMap = normalizeSizeUnitSizeMap(parsedSizeUnitSizeMap);
               } catch (e) {
                 // Don't fail product update because client sent invalid JSON.
                 // Keep previous value to avoid breaking existing products.

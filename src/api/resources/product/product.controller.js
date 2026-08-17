@@ -360,7 +360,7 @@ module.exports = {
       const [products, totalCount] = await Promise.all([
         db.product.findAll({
           where: whereClause,
-          order: [["createdAt", "DESC"]],
+          order: [["id", "DESC"], ["createdAt", "DESC"]],
           limit,
           offset,
           include: [

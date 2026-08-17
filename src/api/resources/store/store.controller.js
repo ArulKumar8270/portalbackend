@@ -781,7 +781,10 @@ module.exports = {
       db.store_product
         .findAll({
           where: { supplierId: req.params.id },
-          order: [[{ model: db.product }, "createdAt", "DESC"]],
+          order: [
+            [{ model: db.product }, "id", "DESC"],
+            [{ model: db.product }, "createdAt", "DESC"],
+          ],
           include: [
             {
               model: db.product,

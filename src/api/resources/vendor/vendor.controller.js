@@ -269,6 +269,7 @@ module.exports = {
         .findAll({
           attributes: ["id", "supplierId", "productId", "unitSize", "price"],
           where: { supplierId: req.params.id },
+          order: [[{ model: db.product }, "createdAt", "DESC"]],
           include: [
             {
               model: db.product

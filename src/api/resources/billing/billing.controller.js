@@ -595,6 +595,7 @@ module.exports = {
 
         const bills = await db.bill.findAll({
         where: { storeId: storeId },
+        order: [["createdAt", "DESC"]],
         include: [
           { model: db.store, required: false },
           { model: db.vendor, as: 'vendor', required: false }

@@ -1,6 +1,114 @@
 const db = require("../../../models");
 const { Op } = require("sequelize");
 
+function upgradeInvoiceFormatHtml(html) {
+  if (!html || typeof html !== "string") return html;
+  let next = html;
+
+  if (!/<th[^>]*>\s*Actual\s*Price/i.test(next)) {
+    next = next.replace(
+      /<th([^>]*)>\s*(?:Rate|UNIT\s*PRICE|Unit\s*Price)\s*<\/th>/gi,
+      "<th$1>Actual Price</th><th$1>Disc %</th><th$1>Disc Price</th>"
+    );
+  }
+
+  next = next.replace(/<table[\s\S]*?<\/table>/gi, (table) => {
+    const isTotalsTable =
+      /Taxable Amount/i.test(table) &&
+      /Total Amount/i.test(table) &&
+      !/GST\s*%/i.test(table);
+    if (!isTotalsTable) return table;
+
+    let updatedTable = table;
+    if (!/Total Actual Price/i.test(updatedTable)) {
+      updatedTable = updatedTable.replace(
+        /(<tr>\s*<td>\s*Taxable Amount\s*:?\s*<\/td>)/i,
+        '<tr><td>Total Actual Price</td><td class="text-right">{{totalActualPrice}}</td></tr>$1'
+      );
+    }
+    if (!/Total Discount Price/i.test(updatedTable)) {
+      updatedTable = updatedTable.replace(
+        /(<tr>\s*<td>\s*Taxable Amount\s*:?\s*<\/td>)/i,
+        '<tr><td>Total Discount Price</td><td class="text-right">{{totalDiscountPrice}}</td></tr>$1'
+      );
+    }
+    return updatedTable;
+  });
+
+  if (!/Total Actual Price/i.test(next)) {
+    next = next.replace(
+      /(<div[^>]*>\s*<span[^>]*>\s*Subtotal:\s*<\/span>)/i,
+      `<div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+          <span style="font-size: 14px; color: #666;">Total Actual Price:</span>
+          <span style="font-size: 14px; font-weight: bold;">{{totalActualPrice}}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+          <span style="font-size: 14px; color: #666;">Total Discount Price:</span>
+          <span style="font-size: 14px; font-weight: bold;">{{totalDiscountPrice}}</span>
+        </div>
+        $1`
+    );
+  }
+
+  next = applyProductTableFontSize(next);
+
+  return next;
+}
+
+function applyProductTableFontSize(html) {
+  if (!html) return html;
+  let next = html;
+  next = next.replace(
+    /\.product-table\s+th\s*\{([^}]*)font-size\s*:\s*[\d.]+px/gi,
+    ".product-table th {$1font-size: 14px"
+  );
+  next = next.replace(
+    /\.product-table\s+td\s*\{([^}]*)font-size\s*:\s*[\d.]+px/gi,
+    ".product-table td {$1font-size: 14px"
+  );
+  if (
+    /\.product-table\s+td\s*\{/i.test(next) &&
+    !/\.product-table\s+td\s*\{[^}]*font-size\s*:\s*14px/i.test(next)
+  ) {
+    next = next.replace(/\.product-table\s+td\s*\{/i, ".product-table td { font-size: 14px; ");
+  }
+  if (/\.product-table\s+th\s*\{/i.test(next) && !/\.product-table\s+td\s*\{/i.test(next)) {
+    next = next.replace(
+      /(\.product-table\s+th\s*\{[^}]*\})/i,
+      "$1\n  .product-table td { font-size: 14px; }"
+    );
+  }
+  return next;
+}
+
+function patchFormatHtml(html) {
+  return upgradeInvoiceFormatHtml(html);
+}
+
+function patchFormatTemplates(format) {
+  const json = format?.toJSON ? format.toJSON() : { ...format };
+  json.template = patchFormatHtml(json.template);
+  json.headerTemplate = patchFormatHtml(json.headerTemplate);
+  json.footerTemplate = patchFormatHtml(json.footerTemplate);
+  return json;
+}
+
+async function persistPatchedFormat(format) {
+  const patched = patchFormatTemplates(format);
+  const needsSave =
+    patched.template !== format.template ||
+    patched.headerTemplate !== format.headerTemplate ||
+    patched.footerTemplate !== format.footerTemplate;
+  if (needsSave) {
+    await format.update({
+      template: patched.template,
+      headerTemplate: patched.headerTemplate,
+      footerTemplate: patched.footerTemplate,
+    });
+  }
+  return patched;
+}
+
 module.exports = {
   // Get all invoice formats
   async getAllFormats(req, res, next) {
@@ -9,10 +117,15 @@ module.exports = {
         order: [['isDefault', 'DESC'], ['createdAt', 'DESC']],
       });
 
+      const data = [];
+      for (const format of formats) {
+        data.push(await persistPatchedFormat(format));
+      }
+
       return res.status(200).json({
         success: true,
-        data: formats,
-        count: formats.length,
+        data,
+        count: data.length,
       });
     } catch (error) {
       console.error("Error fetching invoice formats:", error);
@@ -38,9 +151,11 @@ module.exports = {
         });
       }
 
+      const patched = await persistPatchedFormat(format);
+
       return res.status(200).json({
         success: true,
-        data: format,
+        data: patched,
       });
     } catch (error) {
       console.error("Error fetching invoice format:", error);
@@ -94,9 +209,9 @@ module.exports = {
       const format = await db.invoiceFormat.create({
         name: name.trim(),
         description: description ? description.trim() : null,
-        headerTemplate: headerTemplate ? headerTemplate.trim() : null,
-        template: template.trim(),
-        footerTemplate: footerTemplate ? footerTemplate.trim() : null,
+        headerTemplate: headerTemplate ? patchFormatHtml(headerTemplate.trim()) : null,
+        template: patchFormatHtml(template.trim()),
+        footerTemplate: footerTemplate ? patchFormatHtml(footerTemplate.trim()) : null,
         isDefault: isDefault || false,
       });
 
@@ -149,9 +264,9 @@ module.exports = {
       // Update fields
       if (name !== undefined) format.name = name;
       if (description !== undefined) format.description = description;
-      if (headerTemplate !== undefined) format.headerTemplate = headerTemplate;
-      if (template !== undefined) format.template = template;
-      if (footerTemplate !== undefined) format.footerTemplate = footerTemplate;
+      if (headerTemplate !== undefined) format.headerTemplate = patchFormatHtml(headerTemplate);
+      if (template !== undefined) format.template = patchFormatHtml(template);
+      if (footerTemplate !== undefined) format.footerTemplate = patchFormatHtml(footerTemplate);
       if (isDefault !== undefined) format.isDefault = isDefault;
 
       await format.save();

@@ -93,6 +93,15 @@ module.exports = (sequelize, DataTypes) => {
         type: DataTypes.INTEGER,
         allowNull: true,
       },
+      barcodePrinted: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      },
+      barcodePrintedAt: {
+        type: DataTypes.DATE,
+        allowNull: true,
+      },
       isRentalEnabled: {
         type: DataTypes.BOOLEAN,
         allowNull: false,

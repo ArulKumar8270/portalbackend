@@ -460,6 +460,8 @@ module.exports = {
         oneDayMaxQty,
         oneDayTrialOnly,
         oneDayTrialPrice,
+        barcodePrinted,
+        barcodePrintedAt,
       } = req.body;
 
       // Build where clause for finding product
@@ -507,13 +509,35 @@ module.exports = {
               }
             }
 
+            const providedKeys = Object.keys(req.body || {}).filter(
+              (key) => key !== "id" && key !== "productId"
+            );
+            const isBarcodeOnlyUpdate =
+              barcodePrinted !== undefined &&
+              providedKeys.every(
+                (key) => key === "barcodePrinted" || key === "barcodePrintedAt"
+              );
+
+            if (isBarcodeOnlyUpdate) {
+              return db.product.update(
+                {
+                  barcodePrinted: parseOneDayTruthy(barcodePrinted),
+                  barcodePrintedAt: barcodePrintedAt
+                    ? new Date(barcodePrintedAt)
+                    : parseOneDayTruthy(barcodePrinted)
+                      ? new Date()
+                      : product.barcodePrintedAt,
+                },
+                { where: { id: product.id } }
+              );
+            }
+
             let nextProductSku = product.productSku;
             if (productSku !== undefined) {
               nextProductSku = await assertUniqueProductSku(productSku, product.id);
             }
 
-            return db.product.update(
-              {
+            const updatePayload = {
                 categoryId: categoryId !== undefined ? categoryId : product.categoryId,
                 subCategoryId: subCategoryId !== undefined
                   ? subCategoryId
@@ -548,7 +572,6 @@ module.exports = {
                 size: size !== undefined ? size : product.size,
                 weight: weight !== undefined ? weight : product.weight,
                 height: height !== undefined ? height : product.height,
-                sizeUnitSizeMap: parsedSizeUnitSizeMap,
                 isOneDayEnabled: isOneDayEnabled !== undefined
                   ? parseOneDayTruthy(isOneDayEnabled)
                   : product.isOneDayEnabled,
@@ -584,14 +607,37 @@ module.exports = {
                   }
                   return product.oneDayTrialPrice;
                 })(),
-              },
-              { where: { id: product.id } }
-            );
+              };
+
+            if (sizeUnitSizeMap !== undefined) {
+              updatePayload.sizeUnitSizeMap = parsedSizeUnitSizeMap;
+            }
+            if (barcodePrinted !== undefined) {
+              updatePayload.barcodePrinted = parseOneDayTruthy(barcodePrinted);
+              updatePayload.barcodePrintedAt = barcodePrintedAt
+                ? new Date(barcodePrintedAt)
+                : parseOneDayTruthy(barcodePrinted)
+                  ? new Date()
+                  : product.barcodePrintedAt;
+            } else if (barcodePrintedAt !== undefined) {
+              updatePayload.barcodePrintedAt = barcodePrintedAt
+                ? new Date(barcodePrintedAt)
+                : null;
+            }
+
+            return db.product.update(updatePayload, { where: { id: product.id } });
           }
           throw new RequestError("Not Found Product", 409);
         })
         .then((p) => {
-          res.status(200).json({ success: true, msg: "Updated Successfully" });
+          res.status(200).json({
+            success: true,
+            msg: "Updated Successfully",
+            barcodePrinted:
+              barcodePrinted !== undefined
+                ? parseOneDayTruthy(barcodePrinted)
+                : undefined,
+          });
         })
         .catch(function (err) {
           next(err);

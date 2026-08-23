@@ -1,5 +1,68 @@
 const db = require("../../../models");
 
+async function ensureBillPaymentColumns() {
+  const table = await db.sequelize.getQueryInterface().describeTable("bills");
+  const addCol = async (name, spec) => {
+    if (!table[name]) {
+      await db.sequelize.getQueryInterface().addColumn("bills", name, spec);
+      table[name] = true;
+    }
+  };
+  await addCol("paymentMethod", {
+    type: db.Sequelize.STRING(20),
+    allowNull: true,
+    defaultValue: "Cash",
+  });
+  await addCol("paidAmount", {
+    type: db.Sequelize.DECIMAL(10, 2),
+    allowNull: true,
+  });
+  await addCol("originalAmount", {
+    type: db.Sequelize.DECIMAL(10, 2),
+    allowNull: true,
+  });
+  await addCol("cashAmount", {
+    type: db.Sequelize.DECIMAL(10, 2),
+    allowNull: true,
+  });
+  await addCol("onlineAmount", {
+    type: db.Sequelize.DECIMAL(10, 2),
+    allowNull: true,
+  });
+}
+
+function resolvePaymentFields({
+  paymentMethod,
+  paidAmount,
+  originalAmount,
+  cashAmount,
+  onlineAmount,
+  total,
+}) {
+  const resolvedCashAmount = Number(cashAmount) || 0;
+  const resolvedOnlineAmount = Number(onlineAmount) || 0;
+  const methodText = String(paymentMethod || "").toLowerCase();
+  const resolvedPaymentMethod =
+    (methodText.includes("online") && methodText.includes("cash")) ||
+    methodText.includes("both")
+      ? "Cash+Online"
+      : methodText.includes("online")
+        ? "Online"
+        : "Cash";
+  const resolvedOriginalAmount = Number(originalAmount ?? total) || 0;
+  const resolvedPaidAmount =
+    paidAmount === "" || paidAmount == null
+      ? resolvedCashAmount + resolvedOnlineAmount
+      : Number(paidAmount) || 0;
+  return {
+    resolvedPaymentMethod,
+    resolvedPaidAmount,
+    resolvedOriginalAmount,
+    resolvedCashAmount,
+    resolvedOnlineAmount,
+  };
+}
+
 module.exports = {
   async addBill(req, res, next) {
     try {
@@ -19,6 +82,11 @@ module.exports = {
         notes,
         invoiceFormatId,
         invoiceType,
+        paymentMethod,
+        paidAmount,
+        originalAmount,
+        cashAmount,
+        onlineAmount,
       } = req.body;
 
       // Determine storeId from currentStoreUserId or currentVendorUserId
@@ -72,6 +140,23 @@ module.exports = {
         ? invoiceType 
         : 'Invoice'; // Default to 'Invoice' if not provided or invalid
 
+      await ensureBillPaymentColumns();
+
+      const {
+        resolvedPaymentMethod,
+        resolvedPaidAmount,
+        resolvedOriginalAmount,
+        resolvedCashAmount,
+        resolvedOnlineAmount,
+      } = resolvePaymentFields({
+        paymentMethod,
+        paidAmount,
+        originalAmount,
+        cashAmount,
+        onlineAmount,
+        total,
+      });
+
       // Create the bill
       const bill = await db.bill.create({
         storeId: storeId || currentVendorUserId,
@@ -85,6 +170,11 @@ module.exports = {
         tax: tax || 0,
         taxPercent: taxPercent || 0,
         total: total || 0,
+        paymentMethod: resolvedPaymentMethod,
+        paidAmount: resolvedPaidAmount,
+        originalAmount: resolvedOriginalAmount,
+        cashAmount: resolvedCashAmount,
+        onlineAmount: resolvedOnlineAmount,
         notes: notes || "",
         invoiceFormatId: finalInvoiceFormatId || null,
         invoiceType: finalInvoiceType,
@@ -186,6 +276,11 @@ module.exports = {
         invoiceCopyType,
         termsConditions,
         gstBreakdown,
+        paymentMethod,
+        paidAmount,
+        originalAmount,
+        cashAmount,
+        onlineAmount,
       } = req.body;
 
       const userId = req.user?.id;
@@ -424,6 +519,38 @@ module.exports = {
       }
       if (taxPercent !== undefined) {
         updateData.taxPercent = taxPercent === null || taxPercent === '' ? 0 : parseFloat(taxPercent) || 0;
+      }
+      if (
+        paymentMethod !== undefined ||
+        paidAmount !== undefined ||
+        originalAmount !== undefined ||
+        cashAmount !== undefined ||
+        onlineAmount !== undefined
+      ) {
+        await ensureBillPaymentColumns();
+        const resolved = resolvePaymentFields({
+          paymentMethod: paymentMethod ?? bill.paymentMethod,
+          paidAmount: paidAmount ?? bill.paidAmount,
+          originalAmount: originalAmount ?? bill.originalAmount,
+          cashAmount: cashAmount ?? bill.cashAmount,
+          onlineAmount: onlineAmount ?? bill.onlineAmount,
+          total: bill.total,
+        });
+        if (paymentMethod !== undefined) {
+          updateData.paymentMethod = resolved.resolvedPaymentMethod;
+        }
+        if (paidAmount !== undefined) {
+          updateData.paidAmount = resolved.resolvedPaidAmount;
+        }
+        if (originalAmount !== undefined) {
+          updateData.originalAmount = resolved.resolvedOriginalAmount;
+        }
+        if (cashAmount !== undefined) {
+          updateData.cashAmount = resolved.resolvedCashAmount;
+        }
+        if (onlineAmount !== undefined) {
+          updateData.onlineAmount = resolved.resolvedOnlineAmount;
+        }
       }
 
       // Notes

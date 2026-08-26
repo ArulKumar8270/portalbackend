@@ -728,18 +728,15 @@ module.exports = {
           message: 'Upload payment photo before sending OTP',
         });
       }
-      const addr = parseDeliveryAddress(order.deliveryAddress);
       const otp = randomOtp();
       const expiryMin = Number(process.env.ONE_DAY_OTP_EXPIRY_MINUTES || 10);
       const expiresAt = new Date(Date.now() + expiryMin * 60 * 1000);
       await db.one_day_otps.create({ orderId: order.id, otp, expiresAt });
       notifyDeliveryOtp(order, otp, expiresAt).catch(() => {});
-      const devMode = process.env.NODE_ENV !== 'production';
       res.json({
         success: true,
         message: 'OTP sent to customer app',
         expiresAt,
-        ...(devMode ? { devOtp: otp, phone: addr?.phone } : {}),
       });
     } catch (e) {
       next(e);
@@ -1156,10 +1153,15 @@ module.exports = {
       if (!auth.ok) {
         return res.status(auth.status).json({ success: false, message: auth.message });
       }
-      if (String(order.oneDayStatus || '').toLowerCase() !== 'delivered') {
+      const status = String(order.oneDayStatus || '').toLowerCase();
+      const hasAdvance = Number(order.orderAdvanceAmount || 0) > 0;
+      const canRefund =
+        status === 'delivered' || (status === 'cancelled' && hasAdvance);
+      if (!canRefund) {
         return res.status(400).json({
           success: false,
-          message: 'Refund can only be requested after delivery',
+          message:
+            'Refund can only be requested after delivery, or after cancel if an advance was paid',
         });
       }
       const current = String(order.refundStatus || 'none').toLowerCase();
@@ -1173,6 +1175,9 @@ module.exports = {
       await order.update({
         refundStatus: 'requested',
         refundNote: refundNote || order.refundNote || null,
+      });
+      await logOrderEvent(order.id, 'refund_requested', {
+        note: refundNote || 'Refund requested by customer',
       });
       res.json({
         success: true,
@@ -1212,6 +1217,9 @@ module.exports = {
         patch.refundedAt = refundStatus === 'none' ? null : order.refundedAt;
       }
       await order.update(patch);
+      await logOrderEvent(order.id, `refund_${refundStatus}`, {
+        note: refundNote || `Refund marked ${refundStatus}`,
+      });
       res.json({
         success: true,
         message: 'Refund status updated',
